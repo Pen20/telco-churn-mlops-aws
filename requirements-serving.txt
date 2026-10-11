@@ -1,0 +1,10 @@
+﻿mlflow-skinny==3.17.0
+scikit-learn==1.9.1
+xgboost==3.4.1
+pandas==3.0.6
+numpy==2.5.4
+scipy==1.18.1
+cloudpickle==3.1.2
+fastapi==0.143.0
+pydantic==2.14.1
+uvicorn==0.54.0

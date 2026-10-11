@@ -1,0 +1,9 @@
+{
+  "model_uri": "models:/m-17aa3f43f3bd468d9496ee8909b5c319",
+  "source_run_id": "b1f6a7fbbf684447b45cd02adbfa338e",
+  "threshold": 0.37,
+  "positive_class": 1,
+  "selection_objective": "validation_f1",
+  "dataset_sha256": "16320c9c1ec72448db59aa0a26a0b95401046bef5d02fd3aeb906448e3055e91",
+  "threshold_selection_run_id": "f80979ac83f34dfe9189f1a475640be6"
+}

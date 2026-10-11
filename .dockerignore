@@ -1,2 +1,9 @@
-data/
-notebooks/
+﻿**
+!dockerfile
+!requirements-serving.txt
+!src/
+!src/app/
+!src/app/main.py
+!deployment/
+!deployment/model/
+!deployment/model/**

@@ -20,3 +20,21 @@ data/processed/
 # BUT keep our bundled serving model in the repo
 !src/serving/model/
 !src/serving/model/**
+
+# Local tracking database
+mlflow.db
+mlflow.db-*
+mlartifacts/
+
+# Local backups
+dockerfile.original
+scripts/run_pipeline_original.py
+src/app/main_original.py
+
+# Local environment snapshot
+requirements-local.txt
+
+# Local secrets
+.env
+.env.*
+!.env.example

@@ -1,882 +1,715 @@
-## \# Telco Churn MLOps on AWS
+# Telco Churn MLOps on AWS
 
-## 
+Customer churn prediction using scikit-learn pipelines, XGBoost, MLflow, FastAPI, Docker, GitHub Actions, and Amazon EC2.
 
-## Customer churn prediction using scikit-learn pipelines, XGBoost,
+Repository: [Pen20/telco-churn-mlops-aws](https://github.com/Pen20/telco-churn-mlops-aws)
 
-## MLflow experiment tracking, FastAPI, Docker, GitHub Actions, and
+This project adapts an existing Telco churn implementation and documents the machine learning pipeline, API, automated checks, and AWS deployment verified in this repository.
 
-## manual deployment to Amazon EC2.
+## Project status
 
-## 
+- Training and validation completed.
+- Decision threshold selected using validation data.
+- Selected model evaluated on a reserved test set.
+- Preprocessing and model exported as one pipeline.
+- FastAPI predictions and input validation tested.
+- Docker container tested locally.
+- Container build and API checks passed in GitHub Actions.
+- Container deployed and tested on Amazon EC2.
+- Remote access from Windows verified through an SSH tunnel.
 
-## This project adapts an existing Telco churn implementation.
+The EC2 instance is stopped between demonstrations. There is currently no public API URL or automated AWS deployment.
 
-## It documents the changes and deployment verified in
+## What this project demonstrates
 
-## \[Pen20/telco-churn-mlops-aws](https://github.com/Pen20/telco-churn-mlops-aws).
+- Reproducible train, validation, and test splits.
+- Preprocessing fitted exclusively on training data.
+- Comparison of logistic regression and XGBoost.
+- Experiment tracking and model logging with MLflow.
+- Decision threshold selection for an imbalanced classification task.
+- Export and reload checks for the complete prediction pipeline.
+- An API with validated request and response schemas.
+- Docker packaging with a health check.
+- Automated container and API checks in GitHub Actions.
+- Manual deployment to AWS EC2 with access through SSH forwarding.
 
-## \## Current status
+## Dataset
 
-## 
+The project uses the IBM Telco Customer Churn sample dataset.
 
-## \- Training and validation completed.
+The dataset contains:
 
-## \- Decision threshold selected using validation data.
+- 7,043 customer records.
+- 21 columns.
+- 19 input features after excluding `customerID` and `Churn`.
+- 5,174 customers labelled `No`.
+- 1,869 customers labelled `Yes`.
 
-## \- Selected model evaluated on a reserved test set.
+The target is `Churn`, encoded as:
 
-## \- Complete preprocessing and model pipeline exported.
+- `0`: no churn.
+- `1`: churn.
 
-## \- FastAPI predictions and input validation tested.
+The raw dataset is stored locally at:
 
-## \- Docker image tested locally and in GitHub Actions.
+```text
+data/raw/Telco-Customer-Churn.csv
+```
 
-## \- Container deployed and tested on Amazon EC2.
+Raw data are excluded from Git.
 
-## \- Access from Windows verified through an SSH tunnel.
+To download the dataset in PowerShell:
 
-## 
+```powershell
+New-Item -ItemType Directory -Force -Path data/raw | Out-Null
 
-## The EC2 instance is stopped between demonstrations.
+Invoke-WebRequest `
+    -Uri "https://raw.githubusercontent.com/IBM/telco-customer-churn-on-icp4d/master/data/Telco-Customer-Churn.csv" `
+    -OutFile "data/raw/Telco-Customer-Churn.csv"
+```
 
-## There is currently no public API URL or automated AWS deployment.
+In Linux:
 
-## 
+```bash
+mkdir -p data/raw
 
-## \## Changes made in this adaptation
+curl --fail --location \
+  https://raw.githubusercontent.com/IBM/telco-customer-churn-on-icp4d/master/data/Telco-Customer-Churn.csv \
+  --output data/raw/Telco-Customer-Churn.csv
+```
 
-## 
+## Data preparation
 
-## \- Replaced separate training and serving feature transformations with
+The training script checks required columns, customer identifiers, target labels, and input values.
 
-## &#x20; one fitted preprocessing pipeline.
+Numeric features are:
 
-## \- Added stratified training, validation, and test splits.
+```text
+SeniorCitizen
+tenure
+MonthlyCharges
+TotalCharges
+```
 
-## \- Compared logistic regression and XGBoost.
+Categorical features are:
 
-## \- Added validation-based threshold selection.
+```text
+gender
+Partner
+Dependents
+PhoneService
+MultipleLines
+InternetService
+OnlineSecurity
+OnlineBackup
+DeviceProtection
+TechSupport
+StreamingTV
+StreamingMovies
+Contract
+PaperlessBilling
+PaymentMethod
+```
 
-## \- Recorded dataset hashes and split identifiers in MLflow.
+Blank numeric values are converted to missing values. Missing numeric values are handled by the fitted median imputer.
 
-## \- Exported a model that can run without the MLflow tracking server.
+The preprocessing pipeline applies:
 
-## \- Replaced the API with validated request fields and probability outputs.
+- Median imputation and standard scaling to numeric features.
+- One-hot encoding to categorical features.
 
-## \- Added prediction consistency and invalid-input checks.
+Preprocessing is fitted on the training set and reused for validation, testing, and inference.
 
-## \- Updated Docker packaging to use the exported model.
+## Data splits
 
-## \- Replaced the original Docker Hub workflow with container build and tests.
+The dataset is split with stratification and a random seed of `42`.
 
-## \- Deployed the application manually on EC2 and verified remote predictions.
+| Split | Observations | Purpose |
+|---|---:|---|
+| Training | 4,225 | Fit preprocessing and models |
+| Validation | 1,409 | Compare models and select the threshold |
+| Test | 1,409 | Evaluate the selected model and threshold |
 
-## 
+Customer identifiers for each split are recorded in a split manifest.
 
-## \## Dataset
+The raw dataset SHA-256 hash is logged to help verify that subsequent steps use the same dataset.
 
-## 
+## Model comparison
 
-## The project uses the IBM Telco Customer Churn sample dataset:
+Two candidate pipelines were evaluated:
 
-## 
+- Logistic regression.
+- XGBoost.
 
-## \- 7,043 customers.
+Initial validation results used a decision threshold of `0.5`.
 
-## \- 21 columns, including customer ID and target.
+| Model | Average precision | ROC AUC | Precision | Recall | F1 |
+|---|---:|---:|---:|---:|---:|
+| XGBoost | 0.644330 | 0.837920 | 0.657343 | 0.502674 | 0.569697 |
+| Logistic regression | 0.642275 | 0.835988 | 0.660066 | 0.534759 | 0.590842 |
 
-## \- Target: `Churn`, mapped from `No` / `Yes` to `0` / `1`.
+XGBoost was selected using validation average precision.
 
-## \- 5,174 customers labelled `No`.
+The average precision difference is small. These results describe this split and do not establish a statistically significant advantage for XGBoost.
 
-## \- 1,869 customers labelled `Yes`.
+## Decision threshold
 
-## 
+The selected model produces a probability of churn.
 
-## Source:
+The threshold determines whether that probability becomes a positive churn prediction:
 
-## \[IBM dataset repository](https://github.com/IBM/telco-customer-churn-on-icp4d/blob/master/data/Telco-Customer-Churn.csv).
+```python
+predicted_churn = churn_probability >= threshold
+```
 
-## 
+Thresholds were compared using validation data. The selected threshold maximized validation F1 within the evaluated grid.
 
-## Place the CSV at:
+| Selected threshold | Validation precision | Validation recall | Validation F1 |
+|---|---:|---:|---:|
+| 0.37 | 0.585812 | 0.684492 | 0.631319 |
 
-## 
+Compared with `0.5`, the selected threshold increased recall and F1 while reducing precision.
 
-## ```text
+F1 was used as a learning objective. A business deployment should choose a threshold using the costs and benefits of retention actions.
 
-## data/raw/Telco-Customer-Churn.csv
+## Final test results
 
-## ```
+The selected XGBoost pipeline was evaluated on the reserved test set using the fixed threshold of `0.37`.
 
-## 
+| Metric | Test result |
+|---|---:|
+| Average precision | 0.660882 |
+| ROC AUC | 0.846847 |
+| Precision | 0.582781 |
+| Recall | 0.705882 |
+| F1 | 0.638452 |
 
-## Raw data are excluded from Git. The dataset source is credited separately
+Confusion matrix:
 
-## from the source code.
+| Actual / Predicted | No churn | Churn |
+|---|---:|---:|
+| No churn | 846 | 189 |
+| Churn | 110 | 264 |
 
-## 
+The model identified 264 of the 374 customers who churned in the test set.
 
-## \## Modelling approach
+The test set was evaluated after model and threshold selection. It should not be used to tune subsequent changes.
 
-## 
+## MLflow tracking
 
-## The data are split using stratification and random seed 42:
+The experiment is named:
 
-## 
+```text
+Telco Churn Adaptation
+```
 
-## | Partition | Observations | Purpose |
+The pipeline records information such as:
 
-## |---|---:|---|
+- Model parameters.
+- Validation metrics.
+- Dataset hash.
+- Split identifiers.
+- Training time.
+- Package versions.
+- Saved model.
+- Model reload verification.
 
-## | Training | 4,225 | Fit preprocessing and classifiers |
+Threshold selection and final test evaluation are also logged.
 
-## | Validation | 1,409 | Compare models and select the threshold |
+The selected model from the verified execution has the URI:
 
-## | Test | 1,409 | Evaluate the frozen model and threshold |
+```text
+models:/m-17aa3f43f3bd468d9496ee8909b5c319
+```
 
-## 
+This URI identifies a model in the local MLflow store. It is not a public download URL.
 
-## Customer IDs are excluded from model inputs.
+For deployment, the model is exported to `deployment/model`. The deployed API loads that directory directly and does not require the local MLflow database.
 
-## 
+## Main files
 
-## Numeric features use median imputation and standardisation.
+| File | Purpose |
+|---|---|
+| `scripts/run_pipeline.py` | Validate data, create splits, train candidates, and log results |
+| `scripts/select_threshold.py` | Select a decision threshold using validation data |
+| `scripts/evaluate_test.py` | Evaluate the selected model on reserved test data |
+| `scripts/export_model.py` | Export and verify the selected pipeline |
+| `scripts/test_api_adapted.py` | Check API predictions and input validation |
+| `src/app/main.py` | FastAPI application |
+| `deployment/model/` | Exported model and serving configuration |
+| `requirements-serving.txt` | Dependencies for the adapted application |
+| `dockerfile` | Container image definition |
+| `.github/workflows/ci.yml` | Automated container build and API checks |
 
-## Categorical features use a fitted `OneHotEncoder`.
+The original `requirements.txt` may contain dependencies from the earlier implementation. Use `requirements-serving.txt` for the adapted workflow described here.
 
-## 
+## Local setup
 
-## Preprocessing is fitted only on the training partition.
+Clone the repository:
 
-## The exported pipeline applies the same transformations during inference.
+```bash
+git clone https://github.com/Pen20/telco-churn-mlops-aws.git
+cd telco-churn-mlops-aws
+```
 
-## 
+The verified local environment used Python `3.12.10`.
 
-## \## Validation results
+### Windows PowerShell
 
-## 
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 
-## The initial comparison used a decision threshold of 0.50.
+python -m pip install --upgrade pip
+python -m pip install -r requirements-serving.txt
+python -m pip check
+```
 
-## 
+### Linux
 
-## | Model | Average precision | ROC AUC | Precision | Recall | F1 |
+Use an installed Python 3.12 interpreter:
 
-## |---|---:|---:|---:|---:|---:|
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
 
-## | XGBoost | 0.644330 | 0.837920 | 0.657343 | 0.502674 | 0.569697 |
+python -m pip install --upgrade pip
+python -m pip install -r requirements-serving.txt
+python -m pip check
+```
 
-## | Logistic regression | 0.642275 | 0.835988 | 0.660066 | 0.534759 | 0.590842 |
+Run commands from the repository root unless stated otherwise.
 
-## 
+## Train the models
 
-## XGBoost was selected using validation average precision.
+Download the dataset before training.
 
-## Its advantage was small and does not establish statistical superiority.
+```bash
+python scripts/run_pipeline.py
+```
 
-## 
+The script prints validation results and the selected candidate's model URI.
 
-## For XGBoost, thresholds from 0.05 to 0.95 were compared in steps of 0.01.
+The default MLflow backend is the local SQLite database:
 
-## The selected threshold maximised validation F1:
+```text
+mlflow.db
+```
 
-## 
+The database and generated tracking artifacts are excluded from Git.
 
-## | Selected threshold | Precision | Recall | F1 |
+### View experiments
 
-## |---:|---:|---:|---:|
+Install the full MLflow package if the `mlflow ui` command is unavailable:
 
-## | 0.37 | 0.585812 | 0.684492 | 0.631319 |
+```bash
+python -m pip install mlflow==3.17.0
+```
 
-## 
+Then run:
 
-## F1 was used as a learning-project objective.
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
+```
 
-## A business application should choose a threshold using intervention costs,
+Open:
 
-## missed-churn costs, and operational capacity.
+```text
+http://127.0.0.1:5000
+```
 
-## 
+Keep this terminal open while using the dashboard.
 
-## \## Final test results
+The dashboard is local to the machine running MLflow.
 
-## 
+## Select, evaluate, and export
 
-## The selected XGBoost pipeline and threshold 0.37 were evaluated on
+After a new training execution, update `MODEL_URI` in `scripts/select_threshold.py` to the model URI printed by the training script.
 
-## 1,409 reserved test observations.
+Select the threshold:
 
-## 
+```bash
+python scripts/select_threshold.py
+```
 
-## | Metric | Value |
+Evaluate the selected model and threshold:
 
-## |---|---:|
+```bash
+python scripts/evaluate_test.py
+```
 
-## | Average precision | 0.660882 |
+Export the selected pipeline:
 
-## | ROC AUC | 0.846847 |
+```bash
+python scripts/export_model.py
+```
 
-## | Precision | 0.582781 |
+The threshold selection script writes:
 
-## | Recall | 0.705882 |
+```text
+artifacts/selected_config.json
+```
 
-## | F1 | 0.638452 |
+The export contains:
 
-## 
+```text
+deployment/model/
+├── MLmodel
+├── model.pkl
+├── conda.yaml
+├── python_env.yaml
+├── requirements.txt
+└── serving_config.json
+```
 
-## Confusion matrix:
+The export script checks that predictions from the exported pipeline match the selected model.
 
-## 
+It refuses to overwrite an existing export. Preserve an existing model before creating a replacement.
 
-## | Actual / Predicted | No churn | Churn |
+The bundled export can be used for inference without downloading the dataset or rerunning training.
 
-## |---|---:|---:|
+## Run the API locally
 
-## | No churn | 846 | 189 |
+```bash
+python -m uvicorn src.app.main:app --host 127.0.0.1 --port 8000
+```
 
-## | Churn | 110 | 264 |
+Endpoints:
 
-## 
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/` | GET | Service information |
+| `/health` | GET | Model readiness and identity |
+| `/predict` | POST | Predict churn |
+| `/docs` | GET | Interactive API documentation |
 
-## The model identified 264 of 374 churners.
+Open:
 
-## These results describe one held-out split of this sample dataset.
+```text
+http://127.0.0.1:8000/docs
+```
 
-## They do not establish performance on another telecom population or
+### Health response
 
-## the effectiveness of a retention intervention.
+```json
+{
+  "status": "ready",
+  "model_uri": "models:/m-17aa3f43f3bd468d9496ee8909b5c319",
+  "threshold": 0.37
+}
+```
 
-## 
+The model URI in this response identifies the source of the exported model.
 
-## \## Main files
+### Prediction request
 
-## 
+```json
+{
+  "gender": "Male",
+  "SeniorCitizen": 0,
+  "Partner": "Yes",
+  "Dependents": "No",
+  "tenure": 5,
+  "PhoneService": "Yes",
+  "MultipleLines": "No",
+  "InternetService": "Fiber optic",
+  "OnlineSecurity": "No",
+  "OnlineBackup": "Yes",
+  "DeviceProtection": "No",
+  "TechSupport": "No",
+  "StreamingTV": "Yes",
+  "StreamingMovies": "Yes",
+  "Contract": "Month-to-month",
+  "PaperlessBilling": "Yes",
+  "PaymentMethod": "Electronic check",
+  "MonthlyCharges": 70.35,
+  "TotalCharges": 350.75
+}
+```
 
-## | File | Purpose |
+### Verified prediction response
 
-## |---|---|
+```json
+{
+  "churn_probability": 0.6109859943389893,
+  "threshold": 0.37,
+  "predicted_churn": true,
+  "model_uri": "models:/m-17aa3f43f3bd468d9496ee8909b5c319"
+}
+```
 
-## | `scripts/run\_pipeline.py` | Data validation, splitting, model comparison, MLflow logging |
+`predicted_churn` is `true` because the probability exceeds the threshold of `0.37`.
 
-## | `scripts/select\_threshold.py` | Threshold selection on validation data |
+`TotalCharges` is required in the request but may be `null`. The fitted numeric imputer handles this missing value.
 
-## | `scripts/evaluate\_test.py` | Final evaluation on reserved test data |
+Invalid categories, negative values, unexpected fields, and missing required fields are rejected.
 
-## | `scripts/export\_model.py` | Export and verify the selected pipeline |
+## API checks
 
-## | `scripts/test\_api\_adapted.py` | API consistency and input validation checks |
+With the API running locally:
 
-## | `src/app/main.py` | Adapted FastAPI application |
+```bash
+python scripts/test_api_adapted.py
+```
 
-## | `deployment/model/` | Exported pipeline and serving configuration |
+The checks verify:
 
-## | `requirements-serving.txt` | Pinned serving dependencies |
+- Health status and model identity.
+- Agreement between API predictions and the exported pipeline.
+- Predictions for alternative valid categories.
+- Handling of missing `TotalCharges`.
+- Rejection of invalid requests.
 
-## | `dockerfile` | Linux container configuration |
+Verified output:
 
-## | `.github/workflows/ci.yml` | Container build and automated API checks |
+```text
+PASS: health and model identity
+PASS: API prediction matches exported pipeline
+PASS: alternative categories match exported pipeline
+PASS: missing TotalCharges handled by fitted imputer
+PASS: negative, unknown, extra and missing inputs rejected
 
-## 
+All API checks passed.
+```
 
-## Other files inherited from the original repository may remain.
+## Docker
 
-## The commands below use the adapted implementation.
+Docker must be running before building or starting the container.
 
-## 
+Build the image:
 
-## \## Local setup: Windows PowerShell
+```bash
+docker build -f dockerfile -t telco-churn-api:local .
+```
 
-## 
+Run it on local port `8001`:
 
-## The local environment used Python 3.12.10.
+```bash
+docker run -d --name telco-churn-api -p 127.0.0.1:8001:8000 telco-churn-api:local
+```
 
-## 
+Inspect logs and health:
 
-## ```powershell
+```bash
+docker logs telco-churn-api
+docker inspect --format '{{.State.Health.Status}}' telco-churn-api
+```
 
-## py -3.12 -m venv .venv
+The verified container reported:
 
-## .\\.venv\\Scripts\\Activate.ps1
+```text
+healthy
+```
 
-## python -m pip install -r requirements-serving.txt
+### Test the container from PowerShell
 
-## python -m pip check
+```powershell
+$env:API_BASE_URL = "http://127.0.0.1:8001"
 
-## ```
+python scripts/test_api_adapted.py
 
-## 
+Remove-Item Env:API_BASE_URL
+```
 
-## The serving requirements also contain the packages needed by the current
+### Test the container from Linux
 
-## adapted training scripts. The original `requirements.txt` belongs to
+```bash
+API_BASE_URL=http://127.0.0.1:8001 python scripts/test_api_adapted.py
+```
 
-## the inherited implementation.
+Stop and remove the local container when finished:
 
-## 
+```bash
+docker stop telco-churn-api
+docker rm telco-churn-api
+```
 
-## \## Training and MLflow
+The image runs the application as a non-root user and includes a health check.
 
-## 
+The exported model is bundled into the image.
 
-## With the full dataset in `data/raw`:
+## GitHub Actions
 
-## 
+The workflow in `.github/workflows/ci.yml`:
 
-## ```powershell
+1. Checks out the repository.
+2. Builds the Docker image.
+3. Starts a test container.
+4. Waits for a healthy container.
+5. Runs the API checks inside the container.
+6. Prints logs and removes the test container.
 
-## python scripts/run\_pipeline.py
+The verified workflow passed all API checks.
 
-## ```
+This workflow validates the bundled serving model. It does not retrain the model, publish an image to a registry, or deploy to AWS.
 
-## 
+## AWS EC2 deployment
 
-## The pipeline creates a local SQLite tracking database at `mlflow.db`
+The container was deployed and tested on an Ubuntu EC2 instance.
 
-## and uses the experiment `Telco Churn Adaptation`.
+The verified instance used an x86-64 architecture. Deployment was performed manually.
 
-## 
+### Install Docker and Git
 
-## Open the dashboard:
+On the EC2 instance:
 
-## 
+```bash
+sudo apt update
+sudo apt install -y docker.io git
 
-## ```powershell
+sudo systemctl enable --now docker
+sudo docker version
+```
 
-## mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
+### Clone and build
 
-## ```
+```bash
+git clone https://github.com/Pen20/telco-churn-mlops-aws.git
+cd telco-churn-mlops-aws
 
-## 
+sudo docker build -f dockerfile -t telco-churn-api:aws .
+```
 
-## Visit http://127.0.0.1:5000.
+### Start the container
 
-## 
+```bash
+sudo docker run -d \
+  --name telco-churn-api \
+  --restart unless-stopped \
+  --log-opt max-size=10m \
+  --log-opt max-file=3 \
+  -p 127.0.0.1:8000:8000 \
+  telco-churn-api:aws
+```
 
-## Runs record model parameters, validation metrics, the dataset SHA-256,
+The API port is bound to the EC2 instance's loopback interface.
 
-## split identifiers, confusion matrices, and saved pipelines.
+### Verify readiness
 
-## 
+```bash
+sudo docker logs telco-churn-api
 
-## \### Repeating model selection
+curl --fail http://127.0.0.1:8000/health
 
-## 
+sudo docker inspect --format '{{.State.Health.Status}}' telco-churn-api
+```
 
-## Each training execution creates new model identifiers.
+### Run API checks inside the AWS container
 
-## Before rerunning threshold selection, update `MODEL\_URI` in
+```bash
+sudo docker exec -u 0 telco-churn-api mkdir -p /app/scripts
 
-## `scripts/select\_threshold.py` using the chosen model URI printed by training.
+sudo docker cp scripts/test_api_adapted.py \
+  telco-churn-api:/app/scripts/test_api_adapted.py
 
-## 
+sudo docker exec \
+  -e API_BASE_URL=http://127.0.0.1:8000 \
+  telco-churn-api \
+  python /app/scripts/test_api_adapted.py
+```
 
-## Then run:
+All API checks passed on the EC2 deployment.
 
-## 
+## Access through an SSH tunnel
 
-## ```powershell
+An SSH tunnel forwards a port on the local computer to the API running on EC2.
 
-## python scripts/select\_threshold.py
+The verified forwarding configuration was:
 
-## python scripts/evaluate\_test.py
+```text
+Local address: 127.0.0.1:8002
+Remote destination: 127.0.0.1:8000
+```
 
-## python scripts/export\_model.py
+In Windows PowerShell, replace the key path and public IP with your own values:
 
-## ```
+```powershell
+ssh `
+    -i "C:\path\to\your-key.pem" `
+    -o IdentitiesOnly=yes `
+    -o ExitOnForwardFailure=yes `
+    -N `
+    -L 127.0.0.1:8002:127.0.0.1:8000 `
+    ubuntu@YOUR_EC2_PUBLIC_IP
+```
 
-## 
+Keep this terminal open while using the tunnel.
 
-## Threshold selection writes `artifacts/selected\_config.json`.
+Open the API documentation on your local computer:
 
-## Evaluation and export use this configuration.
+```text
+http://127.0.0.1:8002/docs
+```
 
-## 
+In another PowerShell terminal, activate the project environment and run:
 
-## Freeze the model and threshold before evaluating the test set.
+```powershell
+$env:API_BASE_URL = "http://127.0.0.1:8002"
 
-## Do not use test results to tune them further.
+python scripts/test_api_adapted.py
 
-## 
+Remove-Item Env:API_BASE_URL
+```
 
-## Export refuses to overwrite an existing `deployment/model` directory.
+All API checks passed from Windows through the SSH tunnel.
 
-## Preserve or rename the previous export before producing another version.
+Press `Ctrl+C` in the tunnel terminal to close the tunnel.
 
-## 
+Private SSH keys must remain outside the repository.
 
-## The local MLflow database and tracking artifacts are excluded from Git.
+## Stop and resume the demonstration
 
-## The bundled deployment model can run independently of them.
+When finished:
 
-## 
+1. Close the SSH tunnel.
+2. Stop the EC2 instance in the AWS console.
+3. Confirm that its state is `Stopped`.
 
-## \## Run the local API
+Stopping the instance does not delete its storage. Associated resources can still incur charges.
 
-## 
+To resume:
 
-## ```powershell
+1. Start the EC2 instance.
+2. Check its current public IP address.
+3. Connect to the instance.
+4. Verify the container and health endpoint.
+5. Recreate the SSH tunnel using the current IP address.
 
-## python -m uvicorn src.app.main:app --host 127.0.0.1 --port 8000
+On the instance:
 
-## ```
+```bash
+sudo docker ps
+curl --fail http://127.0.0.1:8000/health
+```
 
-## 
+The container uses the `unless-stopped` restart policy. If necessary, start it explicitly:
 
-## Endpoints:
+```bash
+sudo docker start telco-churn-api
+```
 
-## 
+## Limitations and future improvements
 
-## \- `GET /health`: model readiness, identity, and threshold.
+- Results are based on one stratified train/validation/test split.
+- The decision threshold optimizes validation F1 rather than a business cost function.
+- Probability calibration has not been evaluated.
+- API validation does not implement every possible cross-field business rule.
+- AWS deployment is manual.
+- The application has no public HTTPS endpoint or application authentication.
+- Production monitoring, drift detection, and automated retraining are not implemented.
+- Direct serving dependencies are pinned, but a complete dependency lockfile is not provided.
+- Earlier project files remain in the repository and can be reviewed for cleanup.
 
-## \- `POST /predict`: churn probability and threshold-based classification.
+These are possible next steps rather than completed features.
 
-## \- `/docs`: interactive API documentation.
+## Model loading
 
-## 
+The bundled model uses Python serialization. Load model artifacts only from sources you trust.
 
-## The model directory defaults to `deployment/model`.
+The export and API checks verify prediction consistency for the tested inputs. They do not establish model reliability for every deployment population.
 
-## It can be overridden with the `MODEL\_DIR` environment variable.
+## Repository
 
-## 
+Source code, workflow, and documentation:
 
-## Requests contain 19 customer features.
-
-## `TotalCharges` is required but may be `null`; the fitted imputer handles it.
-
-## Tested invalid categories, negative values, extra fields, and missing
-
-## required fields return HTTP 422.
-
-## 
-
-## \## Example prediction
-
-## 
-
-## ```json
-
-## {
-
-## &#x20; "gender": "Male",
-
-## &#x20; "SeniorCitizen": 0,
-
-## &#x20; "Partner": "Yes",
-
-## &#x20; "Dependents": "No",
-
-## &#x20; "tenure": 5,
-
-## &#x20; "PhoneService": "Yes",
-
-## &#x20; "MultipleLines": "No",
-
-## &#x20; "InternetService": "Fiber optic",
-
-## &#x20; "OnlineSecurity": "No",
-
-## &#x20; "OnlineBackup": "Yes",
-
-## &#x20; "DeviceProtection": "No",
-
-## &#x20; "TechSupport": "No",
-
-## &#x20; "StreamingTV": "Yes",
-
-## &#x20; "StreamingMovies": "Yes",
-
-## &#x20; "Contract": "Month-to-month",
-
-## &#x20; "PaperlessBilling": "Yes",
-
-## &#x20; "PaymentMethod": "Electronic check",
-
-## &#x20; "MonthlyCharges": 70.35,
-
-## &#x20; "TotalCharges": 350.75
-
-## }
-
-## ```
-
-## 
-
-## For the bundled model:
-
-## 
-
-## ```json
-
-## {
-
-## &#x20; "churn\_probability": 0.6109859943389893,
-
-## &#x20; "threshold": 0.37,
-
-## &#x20; "predicted\_churn": true,
-
-## &#x20; "model\_uri": "models:/m-17aa3f43f3bd468d9496ee8909b5c319"
-
-## }
-
-## ```
-
-## 
-
-## The probability is a model estimate, not a certainty.
-
-## Probability calibration has not been independently evaluated.
-
-## 
-
-## \## API tests
-
-## 
-
-## With the local API running:
-
-## 
-
-## ```powershell
-
-## python scripts/test\_api\_adapted.py
-
-## ```
-
-## 
-
-## Checks cover:
-
-## 
-
-## \- Health and model identity.
-
-## \- Predictions matching the exported pipeline.
-
-## \- Alternative categorical inputs.
-
-## \- Missing `TotalCharges`.
-
-## \- Rejection of tested invalid requests.
-
-## 
-
-## \## Docker
-
-## 
-
-## Build:
-
-## 
-
-## ```powershell
-
-## docker build -f dockerfile -t telco-churn-api:local .
-
-## ```
-
-## 
-
-## Run:
-
-## 
-
-## ```powershell
-
-## docker run -d --name telco-churn-api -p 127.0.0.1:8001:8000 telco-churn-api:local
-
-## ```
-
-## 
-
-## Visit http://127.0.0.1:8001/docs.
-
-## 
-
-## Test the container:
-
-## 
-
-## ```powershell
-
-## $env:API\_BASE\_URL = "http://127.0.0.1:8001"
-
-## python scripts/test\_api\_adapted.py
-
-## Remove-Item Env:API\_BASE\_URL
-
-## docker inspect --format '{{.State.Health.Status}}' telco-churn-api
-
-## ```
-
-## 
-
-## The image runs as a non-root user and includes a health check.
-
-## Only the adapted API, serving dependencies, and exported model are copied
-
-## into the image.
-
-## 
-
-## Dependencies directly listed in `requirements-serving.txt` are pinned.
-
-## Transitive dependencies and the base-image tag are not fully locked.
-
-## 
-
-## \## Continuous integration
-
-## 
-
-## GitHub Actions builds the Docker image, starts a test container,
-
-## waits for a healthy API, and executes the API checks inside the container.
-
-## 
-
-## The workflow requires no Docker Hub or AWS credentials.
-
-## It tests the bundled model; it does not retrain models or deploy to AWS.
-
-## 
-
-## \## Manual AWS EC2 deployment
-
-## 
-
-## The application was verified on an x86\_64 `t3.small` instance
-
-## in `us-east-1`, running Ubuntu 26.04 LTS.
-
-## 
-
-## Install Docker and Git:
-
-## 
-
-## ```bash
-
-## sudo apt update
-
-## sudo apt install -y docker.io git
-
-## sudo systemctl enable --now docker
-
-## ```
-
-## 
-
-## Clone and build:
-
-## 
-
-## ```bash
-
-## git clone https://github.com/Pen20/telco-churn-mlops-aws.git
-
-## cd telco-churn-mlops-aws
-
-## sudo docker build -f dockerfile -t telco-churn-api:aws .
-
-## ```
-
-## 
-
-## Run:
-
-## 
-
-## ```bash
-
-## sudo docker run -d \\
-
-## &#x20; --name telco-churn-api \\
-
-## &#x20; --restart unless-stopped \\
-
-## &#x20; --log-opt max-size=10m \\
-
-## &#x20; --log-opt max-file=3 \\
-
-## &#x20; -p 127.0.0.1:8000:8000 \\
-
-## &#x20; telco-churn-api:aws
-
-## ```
-
-## 
-
-## Verify:
-
-## 
-
-## ```bash
-
-## curl --fail --max-time 10 http://127.0.0.1:8000/health
-
-## sudo docker inspect --format '{{.State.Health.Status}}' telco-churn-api
-
-## ```
-
-## 
-
-## Run API tests on EC2:
-
-## 
-
-## ```bash
-
-## sudo docker exec -u 0 telco-churn-api mkdir -p /app/scripts
-
-## sudo docker cp scripts/test\_api\_adapted.py \\
-
-## &#x20; telco-churn-api:/app/scripts/test\_api\_adapted.py
-
-## sudo docker exec \\
-
-## &#x20; -e API\_BASE\_URL=http://127.0.0.1:8000 \\
-
-## &#x20; telco-churn-api \\
-
-## &#x20; python /app/scripts/test\_api\_adapted.py
-
-## ```
-
-## 
-
-## The model loads from the container filesystem.
-
-## An MLflow tracking server is not required on EC2.
-
-## 
-
-## \## Access through an SSH tunnel
-
-## 
-
-## The EC2 API is bound to the instance's loopback interface.
-
-## From Windows, replace the key path and public IP below:
-
-## 
-
-## ```powershell
-
-## ssh -i "C:\\path\\to\\key.pem" -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -N -L 127.0.0.1:8002:127.0.0.1:8000 ubuntu@PUBLIC\_IP
-
-## ```
-
-## 
-
-## Keep the terminal open and visit http://127.0.0.1:8002/docs.
-
-## 
-
-## From another local terminal:
-
-## 
-
-## ```powershell
-
-## $env:API\_BASE\_URL = "http://127.0.0.1:8002"
-
-## python scripts/test\_api\_adapted.py
-
-## Remove-Item Env:API\_BASE\_URL
-
-## ```
-
-## 
-
-## This connection was tested successfully from Windows to EC2.
-
-## 
-
-## The localhost address is usable only on the computer running the tunnel.
-
-## It is not a public demonstration URL.
-
-## SSH access requires the correct private key and permitted network access.
-
-## 
-
-## \## Stopping and resuming
-
-## 
-
-## Close the SSH tunnel with Ctrl+C.
-
-## Closing the tunnel does not stop EC2.
-
-## 
-
-## Stop the instance from the AWS EC2 console between demonstrations.
-
-## Storage and other retained resources may continue consuming credits.
-
-## 
-
-## After starting the instance again:
-
-## 
-
-## 1\. Check its current public IPv4 address.
-
-## 2\. Verify the container and `/health`.
-
-## 3\. Reopen the SSH tunnel using the current address.
-
-## 
-
-## The container is configured with `--restart unless-stopped`.
-
-## 
-
-## \## Limitations and next steps
-
-## 
-
-## \- Manual AWS deployment; continuous deployment is not implemented.
-
-## \- No public HTTPS endpoint or application-level authentication.
-
-## \- No model drift monitoring or automatic retraining.
-
-## \- No independent probability calibration evaluation.
-
-## \- One held-out dataset split; no external population validation.
-
-## \- Request validation does not yet enforce all cross-field service rules.
-
-## \- Training environment and dependencies need a complete lockfile.
-
-## \- Legacy files and documentation need further cleanup.
-
-## 
-
-## \## Repository and dataset
-
-## 
-
-## Project repository:
-
-## \[Pen20/telco-churn-mlops-aws](https://github.com/Pen20/telco-churn-mlops-aws).
-
-## 
-
-## Dataset:
-
-## \[IBM — Telco Customer Churn](https://github.com/IBM/telco-customer-churn-on-icp4d).
-
-## 
-
-## The dataset is an IBM sample dataset.
-
-## Applicable third-party licence notices are retained separately.
-
-## 
-
+[Pen20/telco-churn-mlops-aws](https://github.com/Pen20/telco-churn-mlops-aws)

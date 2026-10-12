@@ -38,3 +38,5 @@ requirements-local.txt
 .env
 .env.*
 !.env.example
+
+CLAUDE.md
